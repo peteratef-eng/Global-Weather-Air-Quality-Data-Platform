@@ -1,0 +1,49 @@
+version: 2
+
+models:
+  - name: stg_weather_hourly
+    description: "Cleaned hourly weather data for Cairo, sourced from the raw weather_hourly table."
+    columns:
+      - name: weather_time
+        description: "Timestamp of the weather reading, in hourly intervals."
+        tests:
+          - not_null
+          - unique
+      - name: temperature_2m
+        description: "Air temperature at 2 meters above ground, in Celsius."
+        tests:
+          - not_null
+      - name: precipitation
+        description: "Amount of precipitation (rain), measured in millimeters."
+      - name: relative_humidity_2m
+        description: "Relative humidity percentage, measured at 2 meters above ground."
+      - name: wind_speed_10m
+        description: "Wind speed measured at 10 meters above ground, in km/h."
+  - name: mart_weather_daily
+    description: "Daily aggregated weather metrics for Cairo, built from hourly staging data. One row per day, summarizing temperature trends."
+    columns:
+      - name: day 
+        description: "Calendar date the metrics are aggregated for."
+        tests:
+          - not_null
+          - unique
+      - name: avg_temp
+        description: "Average air temperature for the day, in Celsius, rounded to 2 decimal places."
+      - name: max_temp
+        description: "Highest air temperature recorded during the day, in Celsius."
+      - name: min_temp
+        description: "Lowest air temperature recorded during the day, in Celsius."
+      - name: total_precipitation
+        description: "Total precipitation (rain) accumulated over the day, in millimeters."
+      - name: avg_humidity
+        description: "Average relative humidity for the day, as a percentage."
+      - name: max_humidity
+        description: "Highest relative humidity recorded during the day, as a percentage."
+      - name: min_humidity
+        description: "Lowest relative humidity recorded during the day, as a percentage."
+      - name: avg_wind_speed
+        description: "Average wind speed for the day, in km/h."
+      - name: max_wind_speed
+        description: "Highest wind speed recorded during the day, in km/h."
+      - name: min_wind_speed
+        description: "Lowest wind speed recorded during the day, in km/h."

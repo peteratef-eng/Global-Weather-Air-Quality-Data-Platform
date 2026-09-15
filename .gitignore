@@ -1,0 +1,12 @@
+.env
+.venv
+exploration.ipynb
+weather-pipeline-key.pem
+__pycache__/
+*.pyc
+target/
+logs/
+dbt_packages/
+data/
+.ssh/
+*~
