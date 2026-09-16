@@ -10,3 +10,4 @@ dbt_packages/
 data/
 .ssh/
 *~
+practice_challenge.ipynb
