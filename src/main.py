@@ -80,7 +80,7 @@ def load_to_postgres(df, table_name, engine):
     print(f"Inserted {result.rowcount} new rows, skipped duplicates")
 
 if __name__ == "__main__":
-    url = "https://api.open-meteo.com/v1/forecast?latitude=30.0444&longitude=31.2357&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m&forecast_days=7"
+    url = "https://api.open-meteo.com/v1/forecast?latitude=30.0444&longitude=31.2357&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m&forecast_days=14"
     data = fetch_weather_data(url)
     if data is not None:
         validation_units(data, expected_units)
