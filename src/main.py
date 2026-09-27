@@ -93,10 +93,12 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
     
     with engine.begin() as connection:
         stmt = insert(table).values(records)
-        stmt = stmt.on_conflict_do_nothing(index_elements=['city','time'])
+        stmt = stmt.on_conflict_do_update(index_elements=['city','time'],
+                                          set_={col :stmt.excluded[col] for col in expected_units},
+                                          )
         result = connection.execute(stmt)
     
-    print(f"Inserted {result.rowcount} new rows, skipped duplicates")
+    print(f"Upserted {result.rowcount} rows (inserted or updated)")
 
 create_table_if_not_exists(engine)
 
