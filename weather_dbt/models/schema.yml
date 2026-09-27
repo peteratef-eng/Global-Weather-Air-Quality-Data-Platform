@@ -2,13 +2,16 @@ version: 2
 
 models:
   - name: stg_weather_hourly
-    description: "Cleaned hourly weather data for Cairo, sourced from the raw weather_hourly table."
+    description: "Cleaned hourly weather data per city, sourced from the raw weather_hourly table."
     columns:
+      - name: city
+        description: "City name for this weather reading."
+        tests:
+          - not_null
       - name: weather_time
         description: "Timestamp of the weather reading, in hourly intervals."
         tests:
           - not_null
-          - unique
       - name: temperature_2m
         description: "Air temperature at 2 meters above ground, in Celsius."
         tests:
