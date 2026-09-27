@@ -4,7 +4,7 @@ import datetime
 import pandas as pd
 from dotenv import load_dotenv
 import os
-from sqlalchemy import create_engine, MetaData, Table
+from sqlalchemy import create_engine, MetaData, Table, text
 from sqlalchemy.dialects.postgresql import insert
 from pathlib import Path
 from sqlalchemy.engine import URL
@@ -33,6 +33,25 @@ expected_units = {
     "wind_speed_10m": "km/h",
     "cloud_cover": "%"
 }
+
+CREATE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS weather_hourly (
+    "time"               timestamp NOT NULL,
+    city                 text      NOT NULL,
+    temperature_2m       double precision,
+    precipitation        double precision,
+    relative_humidity_2m bigint,
+    wind_speed_10m       double precision,
+    cloud_cover          numeric,
+    CONSTRAINT weather_hourly_city_time_key UNIQUE (city, "time")
+);
+"""
+
+def create_table_if_not_exists(engine):
+    with engine.begin() as connection:
+        connection.execute(text(CREATE_TABLE_SQL))
+    print("Table weather_hourly is ready")
+
 
 def run_pipeline_for_city(city_name, lat, lon, engine):
     api_url  = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover&forecast_days=14"
@@ -79,7 +98,7 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
     
     print(f"Inserted {result.rowcount} new rows, skipped duplicates")
 
-
+create_table_if_not_exists(engine)
 
 for city in CITIES:
     run_pipeline_for_city(city["name"], city['lat'], city['lon'], engine)
