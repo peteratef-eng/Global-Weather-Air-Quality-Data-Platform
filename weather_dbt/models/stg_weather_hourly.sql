@@ -4,5 +4,6 @@ SELECT
     temperature_2m,
     precipitation,
     relative_humidity_2m,
-    wind_speed_10m
+    wind_speed_10m,
+    cloud_cover
 FROM {{ source('weather_raw', 'weather_hourly') }}

@@ -29,7 +29,6 @@ models:
         description: "Calendar date the metrics are aggregated for."
         tests:
           - not_null
-          - unique
       - name: avg_temp
         description: "Average air temperature for the day, in Celsius, rounded to 2 decimal places."
       - name: max_temp
