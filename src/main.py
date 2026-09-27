@@ -2,14 +2,24 @@ import requests
 import json
 import datetime
 import pandas as pd
-from sqlalchemy import create_engine
 from dotenv import load_dotenv
 import os
 from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.dialects.postgresql import insert
 from pathlib import Path
+from sqlalchemy.engine import URL
 
 load_dotenv()
+
+db_url = URL.create(
+    drivername="postgresql+psycopg2",
+    username=os.getenv("DB_USER"),
+    password=os.getenv("DB_PASSWORD"),
+    host=os.getenv("DB_HOST"),
+    port=int(os.getenv("DB_PORT", 5432)),
+    database=os.getenv("DB_NAME"),
+)
+engine = create_engine(db_url)
 
 CITIES = [
     {"name": "alexandria", "lat": 31.2058, "lon": 29.9245},
@@ -25,10 +35,10 @@ expected_units = {
 }
 
 def run_pipeline_for_city(city_name, lat, lon, engine):
-    url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover&forecast_days=14"
+    api_url  = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover&forecast_days=14"
 
     try:
-        response = requests.get(url)
+        response = requests.get(api_url )
     except requests.exceptions.RequestException as e:
         print(f"connection failed: {e}")
         return None
@@ -70,14 +80,6 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
     print(f"Inserted {result.rowcount} new rows, skipped duplicates")
 
 
-db_user = os.getenv("DB_USER")
-db_password = os.getenv("DB_PASSWORD")
-db_host = os.getenv("DB_HOST")
-db_port = os.getenv("DB_PORT")
-db_name = os.getenv("DB_NAME")
-
-connection_string = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-engine = create_engine(connection_string)
 
 for city in CITIES:
     run_pipeline_for_city(city["name"], city['lat'], city['lon'], engine)
