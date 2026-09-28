@@ -31,7 +31,7 @@ expected_units = {
     "precipitation": "mm",
     "relative_humidity_2m": "%",
     "wind_speed_10m": "km/h",
-    "cloud_cover": "%"
+    "cloud_cover": "%",
 }
 
 CREATE_TABLE_SQL = """
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS weather_hourly (
 );
 """
 
+
 def create_table_if_not_exists(engine):
     with engine.begin() as connection:
         connection.execute(text(CREATE_TABLE_SQL))
@@ -54,26 +55,23 @@ def create_table_if_not_exists(engine):
 
 
 def run_pipeline_for_city(city_name, lat, lon, engine):
-    api_url  = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover&forecast_days=14"
+    api_url = (
+        f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+        "&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover"
+        "&forecast_days=14"
+    )
 
     try:
         response = requests.get(api_url, timeout=30)
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"API request failed for {city_name}: {e}") from e
-    
+
     if response.status_code == 200:
-        print(f"connection succesfully : {response.status_code}")
+        print(f"[{city_name}] API request successful: {response.status_code}")
         data = response.json()
     else:
-        print(f"connection failed : {response.status_code}")
-        raise RuntimeError(f"for this city {city_name}, connection fail {response.status_code}")
-    
-    for param, unit in expected_units.items():
-        actual_unit = data["hourly_units"][param]
-        if actual_unit == unit:
-            print(f"agreed: {param}: {unit}")
-        else:
-            print(f"faild: {param}: {unit}")
+        raise RuntimeError(f"API returned {response.status_code} for {city_name}")
+
 
     now = datetime.datetime.now()
     now_str = now.strftime("%Y-%m-%d_%H-%M-%S")
@@ -83,25 +81,39 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
     with open(f"data/raw/{file_name}", "w") as f:
         json.dump(data, f)
 
-    df = pd.DataFrame(data['hourly'])
-    df['city'] = city_name
-    df['time'] = pd.to_datetime(df['time'])
-        
+    mismatches = []
+    for param, expected in expected_units.items():
+        actual = data.get("hourly_units", {}).get(param)
+        if actual != expected:
+            mismatches.append(f"{param}: expected {expected!r}, got {actual!r}")
+
+    if mismatches:
+        raise ValueError(
+            f"[{city_name}] unit validation failed (raw file kept: {file_name}): "
+            + "; ".join(mismatches)
+        )
+    print(f"[{city_name}] unit check passed for {len(expected_units)} params")
+
+    df = pd.DataFrame(data["hourly"])
+    df["city"] = city_name
+    df["time"] = pd.to_datetime(df["time"])
 
     records = df.to_dict(orient="records")
     metadata = MetaData()
     table = Table("weather_hourly", metadata, autoload_with=engine)
-    
+
     with engine.begin() as connection:
         stmt = insert(table).values(records)
-        stmt = stmt.on_conflict_do_update(index_elements=['city','time'],
-                                          set_={col :stmt.excluded[col] for col in expected_units},
-                                          )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["city", "time"],
+            set_={col: stmt.excluded[col] for col in expected_units},
+        )
         result = connection.execute(stmt)
-    
-    print(f"Upserted {result.rowcount} rows (inserted or updated)")
+
+    print(f"[{city_name}] Upserted {result.rowcount} rows (inserted or updated)")
+
 
 create_table_if_not_exists(engine)
 
 for city in CITIES:
-    run_pipeline_for_city(city["name"], city['lat'], city['lon'], engine)
+    run_pipeline_for_city(city["name"], city["lat"], city["lon"], engine)
