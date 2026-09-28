@@ -1,10 +1,12 @@
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from datetime import datetime
+from datetime import datetime, timedelta 
 
 default_args = {
     'owner': 'peter',
     'start_date': datetime(2026, 9, 10),
+    'retries': 2,
+    'retry_delay': timedelta(minutes=5),
 }
 
 with DAG(

@@ -57,16 +57,17 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
     api_url  = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,precipitation,relative_humidity_2m,wind_speed_10m,cloud_cover&forecast_days=14"
 
     try:
-        response = requests.get(api_url )
+        response = requests.get(api_url, timeout=30)
     except requests.exceptions.RequestException as e:
-        print(f"connection failed: {e}")
-        return None
+        raise RuntimeError(f"API request failed for {city_name}: {e}") from e
+    
     if response.status_code == 200:
         print(f"connection succesfully : {response.status_code}")
         data = response.json()
     else:
         print(f"connection failed : {response.status_code}")
-        return
+        raise RuntimeError(f"for this city {city_name}, connection fail {response.status_code}")
+    
     for param, unit in expected_units.items():
         actual_unit = data["hourly_units"][param]
         if actual_unit == unit:
