@@ -114,6 +114,16 @@ def run_pipeline_for_city(city_name, lat, lon, engine):
 
 
 create_table_if_not_exists(engine)
+failed = []
+
 
 for city in CITIES:
-    run_pipeline_for_city(city["name"], city["lat"], city["lon"], engine)
+    try:
+        run_pipeline_for_city(city["name"], city["lat"], city["lon"], engine)
+    except Exception as e:
+        print(f"[{city['name']}] failed {e}")
+        failed.append(city["name"])
+
+if failed:
+    raise RuntimeError(f"Pipeline failed for cities: {failed}")
+print("All cities loaded successfully")
