@@ -50,7 +50,7 @@ flowchart LR
 ![Airflow DAG graph](docs/images/airflow_graph.png)
 
 ![Airflow grid](docs/images/airflow_grid.png)
-*Early runs failed while deploying to the cloud (see [Challenges & Debugging](#-challenges--debugging)); later runs, including daily scheduled runs, succeed.*
+*Recent runs on EC2 — daily scheduled runs and manual triggers, all three tasks succeeding. Earlier deployment failures are documented in [Challenges & Debugging](#-challenges--debugging).*
 
 ---
 
@@ -58,9 +58,9 @@ flowchart LR
 
 | Layer | Object | Type | Grain |
 |---|---|---|---|
-| Raw | `weather_hourly` | Table | One row per **city per hour** — unique on `(city, time)` |
-| Staging | `stg_weather_hourly` | View | One row per city per hour (renamed/selected columns) |
-| Mart | `mart_weather_daily` | View | One row per **city per day** — daily avg/min/max per metric |
+| Raw | `weather_hourly` | Table | One row per **city per hour** — unique on `(city, time)`; `time` is **UTC**, exactly as returned by the API |
+| Staging | `stg_weather_hourly` | View | One row per city per hour — `weather_time` converted to **Africa/Cairo** local time, original kept as `weather_time_utc` |
+| Mart | `mart_weather_daily` | View | One row per **city per Cairo-local day** — daily avg/min/max per metric + `hours_count` |
 
 ![dbt lineage](docs/images/dbt_lineage.png)
 
@@ -84,6 +84,9 @@ flowchart LR
 | **Everything scheduled in UTC** (DAG + server start/stop) | Avoids daylight-saving shifts breaking the timing between the server waking up and the DAG running |
 | **Scheduled EC2 start/stop** (EventBridge Scheduler) | A once-a-day batch job doesn't need a 24/7 server |
 | **Least-privilege IAM role** for the scheduler | The role can only start/stop this one instance — nothing else |
+| **Raw timestamps kept in UTC, converted to `Africa/Cairo` in staging** (`AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Cairo'`) | Raw data stays exactly as the API returned it; the local-time conversion happens once, in dbt, and handles daylight-saving changes automatically (a fixed `+3 hours` would break every winter). `weather_time_utc` is kept for traceability |
+| **`hours_count` in the daily mart** instead of filtering out incomplete days | The first/last day of the data can be partial (e.g. 3 hours after the UTC → Cairo shift), and daylight-saving days have 23 or 25 hours — so `HAVING COUNT(*) = 24` would silently drop real days. The mart exposes completeness instead of hiding data |
+| **Per-city failure isolation** — each city is loaded independently; failures are collected and raised once at the end | One failing city no longer blocks the others: successful cities are still saved, and the task still turns red so the failure is noticed. Database errors stay outside the loop and fail immediately |
 
 ---
 
@@ -93,6 +96,7 @@ flowchart LR
 - **dbt schema tests** on staging and mart models
 - **Custom singular test** `assert_mart_unique_city_day` — guarantees the mart grain (one row per city per day)
 - **Row-count and duplicate check** on the server: equal rows per city, same latest timestamp, zero duplicates
+- **Completeness check** — `hours_count` per city per day in the mart; days with fewer than 23 hours are partial and should not be compared with full days
 
 ![Row counts per city on the server — 0 duplicates](docs/images/data_check.png)
 
@@ -130,10 +134,15 @@ Real issues hit while deploying to the cloud, and how they were fixed:
 | 6 | dbt failed parsing `profiles.yml` | YAML requires a space after `:` in `key: value` | Fixed the YAML syntax |
 | 7 | Daily mart mixed both cities into one average | `GROUP BY day` only — mart wasn't updated when `city` was added | Grain changed to `city + day`; uniqueness test updated to match |
 | 8 | **First scheduled run was green, but Alexandria got no new data** | API returned HTTP 503; the code printed the error and `return`ed, so the script exited 0 — a **silent failure** | Raise on API errors, add request timeout and Airflow retries; caught by checking `MAX(time)` per city |
+| 9 | **Daily metrics were shifted by 3 hours** — no error, tests passing | No `timezone` parameter is sent, so Open-Meteo returns **UTC**; the mart grouped by UTC days (a "day" started at 3 AM Cairo time) | Kept raw in UTC, converted to `Africa/Cairo` in staging with `AT TIME ZONE`; caught by noticing the raw data started at `00:00` and ended at `23:00` UTC |
+| 10 | After the timezone fix, a new last day appeared with a max temp **8 °C lower** than the day before | The last 3 UTC hours crossed midnight in Cairo time → a **partial day** with only night hours | Added `hours_count` to the mart; found with `HAVING COUNT(*) <> 24` (first day had 21 hours, last day 3) |
+| 11 | `relation "mart_weather_daily" does not exist` after editing staging | A column (`temperature_2m`) was lost while editing the staging model; dbt rebuilt the staging view (`DROP ... CASCADE` removed the mart) and the new mart failed | Traced backwards with `information_schema.columns`; restored the column. Lesson: the error appeared two steps after the real cause |
+| 12 | Airflow UI on EC2 timed out, even though all containers were healthy | Using a **stale public IP** — it changes on every instance start | Narrowed it down layer by layer (`docker ps` → `curl localhost` on the server → Security Group source IP → port 22 test) until only the address was left; always read the current IP from the EC2 console |
 
 **Main lessons:**
 - Anything done manually in one environment breaks in the next — the pipeline should create everything it needs.
 - A green task doesn't mean correct data — failures must be loud, and outputs must be checked.
+- Always ask "in which timezone?" and "how many rows should there be?" — both silent bugs above were found by comparing the expected count with the actual one.
 
 ---
 
@@ -142,8 +151,8 @@ Real issues hit while deploying to the cloud, and how they were fixed:
 **Prerequisites:** Docker Desktop, Git
 
 ```bash
-git clone https://github.com/peteratef-eng/Global-Weather-Air-Quality-Data-Platform.git
-cd Global-Weather-Air-Quality-Data-Platform
+git clone https://github.com/peteratef-eng/weather-forecast-data-platform.git
+cd weather-forecast-data-platform
 ```
 
 1. Create a `.env` file in the project root:
@@ -197,7 +206,6 @@ docker compose up -d --build
 ## 🔭 Future Improvements
 
 **Known limitations**
-- Timestamps are stored in UTC; daily aggregation uses UTC days rather than Egypt local days
 - Raw JSON is stored on the EC2 disk rather than object storage
 - The server's public IP changes on every start (no Elastic IP, to avoid its hourly cost)
 
