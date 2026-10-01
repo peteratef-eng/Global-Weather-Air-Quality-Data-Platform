@@ -11,3 +11,5 @@ data/
 .ssh/
 *~
 practice_challenge.ipynb
+export/
+depug_test/

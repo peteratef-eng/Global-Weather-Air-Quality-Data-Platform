@@ -1,6 +1,7 @@
 SELECT 
     city,
     DATE(weather_time) AS day,
+    COUNT(*) AS hours_count,
     ROUND(AVG(temperature_2m):: numeric, 2)       AS avg_temp,
     ROUND(MAX(temperature_2m):: numeric, 2)       AS max_temp,
     ROUND(MIN(temperature_2m):: numeric, 2)       AS min_temp,

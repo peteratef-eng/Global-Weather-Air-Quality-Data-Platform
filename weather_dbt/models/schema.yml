@@ -2,14 +2,18 @@ version: 2
 
 models:
   - name: stg_weather_hourly
-    description: "Cleaned hourly weather data per city, sourced from the raw weather_hourly table."
+    description: "Cleaned hourly weather data per city, sourced from the raw weather_hourly table. Raw timestamps from Open-Meteo are in UTC and are converted to Africa/Cairo local time here."
     columns:
       - name: city
         description: "City name for this weather reading."
         tests:
           - not_null
       - name: weather_time
-        description: "Timestamp of the weather reading, in hourly intervals."
+        description: "Timestamp of the weather reading in Africa/Cairo local time (handles summer/winter time automatically). Converted from weather_time_utc."
+        tests:
+          - not_null
+      - name: weather_time_utc
+        description: "Original timestamp of the weather reading as returned by the Open-Meteo API, in UTC (no timezone parameter is sent to the API)."
         tests:
           - not_null
       - name: temperature_2m
@@ -23,12 +27,14 @@ models:
       - name: wind_speed_10m
         description: "Wind speed measured at 10 meters above ground, in km/h."
   - name: mart_weather_daily
-    description: "Daily aggregated weather metrics for Cairo, built from hourly staging data. One row per day, summarizing temperature trends."
+    description: "Daily aggregated weather metrics per city, built from hourly staging data. One row per city per day, where a day is a calendar day in Africa/Cairo local time."
     columns:
       - name: day 
-        description: "Calendar date the metrics are aggregated for."
+        description: "Calendar date (Africa/Cairo local time) the metrics are aggregated for."
         tests:
           - not_null
+      - name: hours_count
+        description: "Number of hourly readings aggregated into this day. Normally 24; lower on the first/last day of the dataset (partial days at the edges, especially after converting UTC to Cairo time), and 23 or 25 on daylight-saving change days. Treat days with fewer than 23 hours as incomplete when comparing daily metrics."
       - name: avg_temp
         description: "Average air temperature for the day, in Celsius, rounded to 2 decimal places."
       - name: max_temp
