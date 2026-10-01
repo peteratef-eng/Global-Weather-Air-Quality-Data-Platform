@@ -87,6 +87,7 @@ flowchart LR
 | **Raw timestamps kept in UTC, converted to `Africa/Cairo` in staging** (`AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Cairo'`) | Raw data stays exactly as the API returned it; the local-time conversion happens once, in dbt, and handles daylight-saving changes automatically (a fixed `+3 hours` would break every winter). `weather_time_utc` is kept for traceability |
 | **`hours_count` in the daily mart** instead of filtering out incomplete days | The first/last day of the data can be partial (e.g. 3 hours after the UTC → Cairo shift), and daylight-saving days have 23 or 25 hours — so `HAVING COUNT(*) = 24` would silently drop real days. The mart exposes completeness instead of hiding data |
 | **Per-city failure isolation** — each city is loaded independently; failures are collected and raised once at the end | One failing city no longer blocks the others: successful cities are still saved, and the task still turns red so the failure is noticed. Database errors stay outside the loop and fail immediately |
+| **Email alert on final task failure** (`SmtpNotifier` as `on_failure_callback`, Gmail SMTP via an Airflow Connection) | A red task at 3 AM is useless if nobody sees it. The alert fires only after all retries fail, so transient errors don't spam the inbox; SMTP credentials never reach Git |
 
 ---
 
@@ -107,7 +108,7 @@ flowchart LR
 - **Compute:** EC2 `m7i-flex.large` (2 vCPU, 8 GB RAM) — upgraded from `t3.micro` after the Airflow stack ran out of memory on 1 GB
 - **Runtime:** Docker Compose (Airflow 3 API server, scheduler, DAG processor, triggerer + 2 Postgres containers)
 - **Code delivery:** GitHub is the source of truth → `git pull` on the server; the project folder is volume-mounted into the Airflow containers, so code changes need no image rebuild
-- **Network security:** Airflow UI (port 8080) restricted to a single IP via Security Group; Postgres ports are not exposed publicly; default Airflow credentials changed
+- **Network security:** Airflow UI (port 8080) restricted to a single IP via Security Group; SSH (port 22) restricted to my IP and the EC2 Instance Connect range for the region; Postgres ports are not exposed publicly; default Airflow credentials changed
 - **Cost control:** EventBridge Scheduler starts the instance at 23:45 UTC and stops it at 00:30 UTC — the DAG runs at 00:00 UTC in between. This cuts EC2 compute hours by ~97% (45 min/day instead of 24 h). An AWS Budget alert tracks spend.
 
 ```
@@ -117,6 +118,23 @@ flowchart LR
 ```
 
 ![EventBridge start/stop schedules](docs/images/eventbridge_schedules.png)
+
+---
+
+## 🔔 Monitoring & Alerting
+
+The pipeline runs unattended at 00:00 UTC, so a failure has to reach me — a red task in a UI nobody is looking at is a silent failure.
+
+- **Email on final failure** — an `SmtpNotifier` is attached as `on_failure_callback` in the DAG's `default_args`, so it covers all three tasks
+- **Only after retries are exhausted** — transient errors are retried twice (5 min apart); the email fires only on the final failed try, so the inbox isn't flooded by issues that fix themselves
+- **No credentials in code** — Gmail SMTP (App Password) is stored in an Airflow Connection (`smtp_default`), never in Git
+- **The email says where to look** — DAG, task, run ID and try number
+
+**Tested on purpose:** the weather database container was stopped (`docker stop`) and the DAG triggered. `run_main_py` failed on all 3 tries, downstream tasks were marked `upstream_failed` (so dbt never ran on missing data), and the alert arrived in the inbox. The container was then restarted and the next run succeeded.
+
+![Failure test — run_main_py failed after 3 tries, downstream tasks upstream_failed](docs/images/failure_test_run.png)
+
+![Failure alert email](docs/images/failure_alert_email.png)
 
 ---
 
@@ -138,11 +156,14 @@ Real issues hit while deploying to the cloud, and how they were fixed:
 | 10 | After the timezone fix, a new last day appeared with a max temp **8 °C lower** than the day before | The last 3 UTC hours crossed midnight in Cairo time → a **partial day** with only night hours | Added `hours_count` to the mart; found with `HAVING COUNT(*) <> 24` (first day had 21 hours, last day 3) |
 | 11 | `relation "mart_weather_daily" does not exist` after editing staging | A column (`temperature_2m`) was lost while editing the staging model; dbt rebuilt the staging view (`DROP ... CASCADE` removed the mart) and the new mart failed | Traced backwards with `information_schema.columns`; restored the column. Lesson: the error appeared two steps after the real cause |
 | 12 | Airflow UI on EC2 timed out, even though all containers were healthy | Using a **stale public IP** — it changes on every instance start | Narrowed it down layer by layer (`docker ps` → `curl localhost` on the server → Security Group source IP → port 22 test) until only the address was left; always read the current IP from the EC2 console |
+| 13 | EC2 Instance Connect stopped working after tightening SSH | SSH was restricted to my IP only, but Instance Connect connects from **AWS-owned IPs**, not from my machine | Added the EC2 Instance Connect IP range for `eu-central-1` as a second SSH source; confirmed by the `Last login from 3.120.181.x` line |
+| 14 | Failure alert email never arrived, although the task failed as expected | The SMTP connection had both SSL (port 465) and STARTTLS enabled → `STARTTLS extension not supported by server` (the connection was already encrypted) | Found in the last try's task log (callback errors don't fail the task, so they're easy to miss); disabled TLS on the connection (SSL-only on 465) and re-ran the failure test |
 
 **Main lessons:**
 - Anything done manually in one environment breaks in the next — the pipeline should create everything it needs.
 - A green task doesn't mean correct data — failures must be loud, and outputs must be checked.
 - Always ask "in which timezone?" and "how many rows should there be?" — both silent bugs above were found by comparing the expected count with the actual one.
+- Error-handling code only runs when something fails — so break things on purpose (bad coordinates, a stopped database) and check that the pipeline reacts the way it should.
 
 ---
 
@@ -218,7 +239,6 @@ docker compose up -d --build
 - `.env.example` template
 - Raw data to **S3**
 - Automated deploy to EC2 on merge (replacing manual `git pull`)
-- Failure alerting (email/Slack callbacks)
 - Streamlit dashboard for the daily mart
 
 ---
